@@ -22,7 +22,6 @@ import (
 	"github.com/oklog/run"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"github.com/thanos-io/thanos/pkg/receive"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	kerrors "k8s.io/apimachinery/pkg/api/errors"
@@ -54,6 +53,15 @@ const (
 	other  label = "other"
 )
 
+// HashringConfig represents the configuration for a hashring
+// a receive node knows about.
+type HashringConfig struct {
+	Hashring   string   `json:"hashring,omitempty"`
+	Tenants    []string `json:"tenants,omitempty"`
+	Endpoints  []string `json:"endpoints"`
+	TenantOnly bool     `json:"tenant_only,omitempty"`
+}
+
 func main() {
 	config := struct {
 		KubeConfig             string
@@ -67,6 +75,7 @@ func main() {
 		Scheme                 string
 		InternalAddr           string
 		ScaleTimeout           time.Duration
+		TenantOnly             bool
 	}{}
 
 	flag.StringVar(&config.KubeConfig, "kubeconfig", "", "Path to kubeconfig")
@@ -80,6 +89,7 @@ func main() {
 	flag.StringVar(&config.Scheme, "scheme", "http", "The URL scheme on which receive components accept write requests")
 	flag.StringVar(&config.InternalAddr, "internal-addr", ":8080", "The address on which internal server runs")
 	flag.DurationVar(&config.ScaleTimeout, "scale-timeout", defaultScaleTimeout, "A timeout to wait for receivers to really start after they report healthy")
+	flag.BoolVar(&config.TenantOnly, "tenant-only", false, "Hash labels based on tenants only")
 	flag.Parse()
 
 	logger := log.NewLogfmtLogger(log.NewSyncWriter(os.Stderr))
@@ -127,6 +137,7 @@ func main() {
 			labelKey:               labelKey,
 			labelValue:             labelValue,
 			scaleTimeout:           config.ScaleTimeout,
+			tenantOnly:             config.TenantOnly,
 		}
 		c := newController(klient, logger, opt)
 		c.registerMetrics(reg)
@@ -297,6 +308,7 @@ type options struct {
 	labelKey               string
 	labelValue             string
 	scaleTimeout           time.Duration
+	tenantOnly             bool
 }
 
 type controller struct {
@@ -489,7 +501,7 @@ func (c *controller) sync() {
 
 	cm := configMap.(*corev1.ConfigMap)
 
-	var hashrings []receive.HashringConfig
+	var hashrings []HashringConfig
 	if err := json.Unmarshal([]byte(cm.Data[c.options.fileName]), &hashrings); err != nil {
 		c.reconcileErrors.WithLabelValues(decode).Inc()
 		level.Warn(c.logger).Log("msg", "failed to decode configuration", "err", err)
@@ -557,7 +569,7 @@ func (c controller) waitForPod(name string) error {
 	})
 }
 
-func (c *controller) populate(hashrings []receive.HashringConfig, statefulsets map[string]*appsv1.StatefulSet) {
+func (c *controller) populate(hashrings []HashringConfig, statefulsets map[string]*appsv1.StatefulSet) {
 	for i, h := range hashrings {
 		if sts, exists := statefulsets[h.Hashring]; exists {
 			var endpoints []string
@@ -582,13 +594,14 @@ func (c *controller) populate(hashrings []receive.HashringConfig, statefulsets m
 			}
 
 			hashrings[i].Endpoints = endpoints
+			hashrings[i].TenantOnly = c.options.tenantOnly
 			c.hashringNodes.WithLabelValues(h.Hashring).Set(float64(len(endpoints)))
 			c.hashringTenants.WithLabelValues(h.Hashring).Set(float64(len(h.Tenants)))
 		}
 	}
 }
 
-func (c *controller) saveHashring(hashring []receive.HashringConfig, orgCM *corev1.ConfigMap) error {
+func (c *controller) saveHashring(hashring []HashringConfig, orgCM *corev1.ConfigMap) error {
 	buf, err := json.Marshal(hashring)
 	if err != nil {
 		return err
