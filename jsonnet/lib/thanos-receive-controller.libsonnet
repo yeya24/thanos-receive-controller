@@ -146,7 +146,7 @@ function(params) {
         '--configmap-generated-name=%s-generated' % trc.configmap.metadata.name,
         '--file-name=hashrings.json',
         '--namespace=$(NAMESPACE)',
-        '--tenantOnly=%s' % trc.config.tenantOnly,
+        '--tenant-only=%s' % trc.config.tenantOnly,
       ] +
       (
         if std.length(trc.config.clusterDomain) > 0 then [
