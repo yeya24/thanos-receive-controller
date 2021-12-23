@@ -14,6 +14,7 @@ local defaults = {
   serviceMonitor: false,
   ports: { http: 8080 },
   clusterDomain: '',
+  tenantOnly: false,
 
   commonLabels:: {
     'app.kubernetes.io/name': 'thanos-receive-controller',
@@ -145,6 +146,7 @@ function(params) {
         '--configmap-generated-name=%s-generated' % trc.configmap.metadata.name,
         '--file-name=hashrings.json',
         '--namespace=$(NAMESPACE)',
+        '--tenantOnly=%s' % trc.config.tenantOnly,
       ] +
       (
         if std.length(trc.config.clusterDomain) > 0 then [

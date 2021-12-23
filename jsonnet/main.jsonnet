@@ -6,6 +6,7 @@ local trc = (import 'lib/thanos-receive-controller.libsonnet')({
   image: 'quay.io/observatorium/thanos-receive-controller:' + cfg.version,
   replicas: 1,
   hashrings: (import 'hashrings.jsonnet'),
+  tenantOnly: false,
 });
 
 { [name]: trc[name] for name in std.objectFields(trc) if trc[name] != null }
